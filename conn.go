@@ -73,26 +73,33 @@ func (c *Conn) Close() error {
 func (c *Conn) Read(_ context.Context, msg *cdproto.Message) error {
 	// get websocket reader
 	c.reader = wsutil.Reader{Source: c.conn, State: ws.StateClientSide}
-	h, err := c.reader.NextFrame()
-	if err != nil {
-		return err
-	}
+	for {
+		h, err := c.reader.NextFrame()
+		if err != nil {
+			return err
+		}
 
-	if h.OpCode == ws.OpPing { // ping
-		if c.debugf != nil {
-			c.debugf("received ping frame, ignoring...")
+		if h.OpCode == ws.OpPing { // ping
+			if c.debugf != nil {
+				c.debugf("received ping frame, ignoring...")
+			}
+			// Pings are sent by the server to keep the connection alive.
+			// They can be safely ignored.
+			// We continue here to read the next frame from the connection.
+			continue
+		} else if h.OpCode == ws.OpClose { // close
+			if c.debugf != nil {
+				c.debugf("received close frame")
+			}
+			return io.EOF
+		} else if h.OpCode != ws.OpText {
+			if c.debugf != nil {
+				c.debugf("unknown OpCode: %s", h.OpCode)
+			}
+			return ErrInvalidWebsocketMessage
 		}
-		return nil
-	} else if h.OpCode == ws.OpClose { // close
-		if c.debugf != nil {
-			c.debugf("received close frame")
-		}
-		return io.EOF
-	} else if h.OpCode != ws.OpText {
-		if c.debugf != nil {
-			c.debugf("unknown OpCode: %s", h.OpCode)
-		}
-		return ErrInvalidWebsocketMessage
+		// It's a text frame, so we break the loop to process it.
+		break
 	}
 
 	var b bytes.Buffer
